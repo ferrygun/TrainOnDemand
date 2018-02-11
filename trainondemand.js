@@ -190,13 +190,6 @@ function main() {
 		if(returnValue != 'error') {
 			returnValue = JSON.stringify(JSON.parse(returnValue).results).split(':').splice(0)[2];
 
-			let returnValueP = returnValue.search("Policy=");
-			let returnValueS = returnValue.search("Signature=");
-			let returnValueK  = returnValue.search("Key-Pair-Id=");
-
-			returnValueP = returnValue.substring(returnValueP + 7, returnValueS-1);
-			returnValueS = returnValue.substring(returnValueS + 10, returnValueK-1);
-			returnValueK = returnValue.substring(returnValueK + 12, returnValue.length-2);
 
 			getStations(returnValueK, returnValueS, returnValueP, function(returnValue) {
 				mrtstations = JSON.parse(returnValue);
