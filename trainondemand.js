@@ -1,3 +1,4 @@
+//Dialogflow: TrainOnDemand
 'use strict';
 
 const express = require('express');
@@ -9,6 +10,21 @@ const StringBuilder = require("string-builder");
 const zlib = require('zlib');
 const fs = require("fs");
 const { DialogflowApp } = require('actions-on-google');
+
+let HAWK_HEADER_PREFIX = "hawk.1.header";
+let SLF = "\n";
+
+let ts = 0;
+let get = 'GET';
+
+let host = 'connectv3.smrt.wwprojects.com';
+let hashq = 'q/t+NNAkQZNlq/aAD6PlexImwQTxwgT2MahfTa9XRLA=';
+let key = 'h42325aqx6krj5z2uzm5e8wwqr2wchk5xq704n1e';
+let hmac;
+let mac;
+
+let path_smrt = '/smrt';
+let path_arrivaltime = '/api/train_arrival_time_by_id/?station=';
 
 let speech = '';
 let mrtstations = '';
@@ -36,8 +52,97 @@ let IMG_URL_PICTURE = 'http://duocompass.com/img_sggothere/mrt.png';
 const ACTION_MRT = 'action.MRT';
 const ACTION_REFRESH = 'action.Refresh';
 
+
+function genRandomString(length) {
+    return crypto.randomBytes(Math.ceil(length / 2))
+        .toString('hex') /** convert to hexadecimal format */
+        .slice(0, length); /** return required number of characters */
+};
+
+function getBaseString(path, ts, type, hash, nonce) {
+    let sb = new StringBuilder();
+    sb.append(HAWK_HEADER_PREFIX).append(SLF);
+    sb.append(ts).append(SLF);
+    sb.append(nonce).append(SLF);
+    sb.append(type).append(SLF);
+    sb.append(path).append(SLF);
+    sb.append(host).append(SLF);
+    sb.append(443).append(SLF);
+    sb.append(hash).append(SLF);
+    sb.append('').append(SLF);
+    //console.log(sb.toString());
+    return sb;
+}
+
 function requestToken(callback) {
-	//This function is based on the SMRTConnect app analysis.
+    let path = '/smrt/api/cdn_token/';
+	ts = (Date.now() / 1000 | 0) + 700;
+	let nonce = genRandomString(12).toUpperCase(); //'57CA1CCA2300';
+	let sb = getBaseString(path, ts, get, hashq, nonce).toString();
+    hmac = crypto.createHmac('sha256', key);
+    hmac.write(sb);
+    hmac.end();
+    mac = new Buffer(hmac.read()).toString('base64');
+
+    let headers = {
+		'Connection': 'Keep-Alive',
+        'User-Agent': 'SMRT Connect/3.0 Android/7.0',
+        'Accept-Encoding': 'gzip',
+		'Connection': 'Keep-Alive',
+        'Content-Type': 'text/plain',
+		'Referer': 'https://connectv3.smrt.wwprojects.com/smrt/',
+        'Authorization': "Hawk id=\"ww-connectv3-android\",mac=\"" + mac + "\",hash=\"" + hashq + "\",ts=\"" + ts + "\",nonce=\"" + nonce + "\""
+    }
+
+    let options = {
+        url: 'https://' + host + path,
+        method: 'GET',
+        headers: headers
+    }
+    //console.log(options);
+
+
+    let requestWithEncoding = function(options, callback) {
+        let req = request.get(options);
+
+        req.on('response', function(res) {
+            let chunks = [];
+            res.on('data', function(chunk) {
+                chunks.push(chunk);
+            });
+
+            res.on('end', function() {
+                let buffer = Buffer.concat(chunks);
+                let encoding = res.headers['content-encoding'];
+                if (encoding == 'gzip') {
+                    zlib.gunzip(buffer, function(err, decoded) {
+                        callback(err, decoded && decoded.toString());
+                    });
+                } else if (encoding == 'deflate') {
+                    zlib.inflate(buffer, function(err, decoded) {
+                        callback(err, decoded && decoded.toString());
+                    })
+                } else {
+                    callback(null, buffer.toString());
+                }
+            });
+        });
+
+        req.on('error', function(err) {
+            callback(err);
+        });
+    }
+
+    requestWithEncoding(options, function(err, data) {
+        if (err) {
+			console.log('requestToken err:' + err);
+			callback('error');
+		}
+        else 
+			callback(data);
+    })
+	
+
 }
 
 function uncapitalize(s) {
@@ -62,9 +167,138 @@ function getMRTAll(callback) {
 }
 
 function requestArrivalTiming(stationcode, callback) {
-	//This function is based on the SMRTConnect app analysis.
+	stationcode = encodeURI(stationcode.trim());
+	ts = (Date.now() / 1000 | 0) + 700;
+	let nonce = genRandomString(12).toUpperCase(); //'57CA1CCA2300';
+
+    let sb = getBaseString(path_smrt + path_arrivaltime + stationcode, ts, get, hashq, nonce).toString();
+    hmac = crypto.createHmac('sha256', key);
+    hmac.write(sb);
+    hmac.end();
+    mac = new Buffer(hmac.read()).toString('base64');
+
+    let headers = {
+		'Connection': 'Keep-Alive',
+        'User-Agent': 'SMRT Connect/3.0 Android/7.0',
+        'Accept-Encoding': 'gzip',
+		'Connection': 'Keep-Alive',
+        'Content-Type': 'text/plain',
+		'Referer': 'https://connectv3.smrt.wwprojects.com/smrt/',
+        'Authorization': "Hawk id=\"ww-connectv3-android\",mac=\"" + mac + "\",hash=\"" + hashq + "\",ts=\"" + ts + "\",nonce=\"" + nonce + "\""
+    }
+
+    let url = host + path_smrt + path_arrivaltime + stationcode;
+    let options = {
+        url: 'https://' + url,
+        method: 'GET',
+        headers: headers,
+    }
+    //console.log(options);
+
+    let requestWithEncoding = function(options, callback) {
+        let req = request.get(options);
+
+        req.on('response', function(res) {
+            let chunks = [];
+            res.on('data', function(chunk) {
+                chunks.push(chunk);
+            });
+
+            res.on('end', function() {
+                let buffer = Buffer.concat(chunks);
+                let encoding = res.headers['content-encoding'];
+                if (encoding == 'gzip') {
+                    zlib.gunzip(buffer, function(err, decoded) {
+                        callback(err, decoded && decoded.toString());
+                    });
+                } else if (encoding == 'deflate') {
+                    zlib.inflate(buffer, function(err, decoded) {
+                        callback(err, decoded && decoded.toString());
+                    })
+                } else {
+                    callback(null, buffer.toString());
+                }
+            });
+        });
+
+        req.on('error', function(err) {
+            callback(err);
+        });
+    }
+
+    requestWithEncoding(options, function(err, data) {
+        if (err) {
+			console.log('requestArrivalTiming err:' + err);
+			callback('error');
+        } else 
+			//console.log(data);
+			callback(data);
+    })
+
 }
 
+function getStations(keypairid, signature, policy, callback) {
+    let path = '/autoupdate_data/stations.json?Key-Pair-Id=' + keypairid + '&Signature=' + signature + '&Policy=' + policy;
+
+    let headers = {
+		'Connection': 'Keep-Alive',
+        'User-Agent': 'SMRT Connect/3.0 Android/7.0',
+        'Accept-Encoding': 'gzip',
+		'Connection': 'Keep-Alive',
+        'Content-Type': 'text/plain',
+		'Referer': 'https://connect.smrt.wwprojects.com/smrt/',
+    }
+
+    let options = {
+        url: 'http://connect-v3-cdn.smrt.wwprojects.com' + path,
+        method: 'GET',
+        headers: headers
+    }
+    //console.log(options);
+
+
+    let requestWithEncoding = function(options, callback) {
+        let req = request.get(options);
+
+        req.on('response', function(res) {
+            let chunks = [];
+            res.on('data', function(chunk) {
+                chunks.push(chunk);
+            });
+
+            res.on('end', function() {
+                let buffer = Buffer.concat(chunks);
+                let encoding = res.headers['content-encoding'];
+                if (encoding == 'gzip') {
+                    zlib.gunzip(buffer, function(err, decoded) {
+                        callback(err, decoded && decoded.toString());
+                    });
+                } else if (encoding == 'deflate') {
+                    zlib.inflate(buffer, function(err, decoded) {
+                        callback(err, decoded && decoded.toString());
+                    })
+                } else {
+                    callback(null, buffer.toString());
+                }
+            });
+        });
+
+        req.on('error', function(err) {
+            callback(err);
+        });
+    }
+
+    requestWithEncoding(options, function(err, data) {
+        if (err) {
+			console.log('requestToken err:' + err);
+			callback('error');
+		}
+        else 
+			callback(data);
+    })
+	
+
+}
 function getMRTTrainArrival(stationname, cb) {
 	ArrayMRT = [];
 	let speech = '';
@@ -190,11 +424,19 @@ function main() {
 		if(returnValue != 'error') {
 			returnValue = JSON.stringify(JSON.parse(returnValue).results).split(':').splice(0)[2];
 
+			let returnValueP = returnValue.search("Policy=");
+			let returnValueS = returnValue.search("Signature=");
+			let returnValueK  = returnValue.search("Key-Pair-Id=");
+
+			returnValueP = returnValue.substring(returnValueP + 7, returnValueS-1);
+			returnValueS = returnValue.substring(returnValueS + 10, returnValueK-1);
+			returnValueK = returnValue.substring(returnValueK + 12, returnValue.length-2);
 
 			getStations(returnValueK, returnValueS, returnValueP, function(returnValue) {
 				mrtstations = JSON.parse(returnValue);
 				
 				getMRTAll(function(returnValue) {
+					//Start of the Program
 					init();
 				});
 			});
@@ -202,26 +444,33 @@ function main() {
 	});
 }
 
-
 function init() {
 	exps.use(bodyParser.json());
 
 	exps.post('/hook', function(request, response) {
 		const app = new DialogflowApp({request, response});
+		//console.log('Request headers: ' + JSON.stringify(request.headers));
+		//console.log('Request body: ' + JSON.stringify(request.body));
 		
 		function MRTIntent(app) {
 			mrtstationname = app.getArgument('MRTStation');
 
+			//const param = app.getArgument('OPTION');
+
 			if (mrtstationname == null) 
 				mrtstationname = app.getSelectedOption().split('|')[0];
+			
 
+			console.log('mrtstationname: ' + mrtstationname);
 			mrtstationnameR = mrtstationname;
-			done = 1;		    			
+			done = 1;
+		    			
 			getMRTTrainArrival_Process(app, mrtstationname);
 		}
 
 		function RefreshIntent(app) {
 			done = 1;
+			console.log('mrtstationnameR: ' + mrtstationnameR);
 			getMRTTrainArrival_Process(app, mrtstationnameR);
         }
 
@@ -235,3 +484,13 @@ function init() {
 		console.log("TrainOnDemand: App up and running, listening.")
 	})
 }
+
+function test() {
+	requestArrivalTiming(encodeURI('Commonwealth'), function(returnValue) {
+		console.log(JSON.parse(returnValue));
+	});
+}
+
+main();
+
+
